@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import AudioVideoControllerState from '../audiovideocontroller/AudioVideoControllerState';
+import BackoffPolicy from '../backoff/Backoff';
+import FullJitterBackoff from '../backoff/FullJitterBackoff';
 import RemovableObserver from '../removableobserver/RemovableObserver';
 import TimeoutScheduler from '../scheduler/TimeoutScheduler';
 import VideoTile from '../videotile/VideoTile';
 import VideoTileState from '../videotile/VideoTileState';
 import BaseTask from './BaseTask';
-
 /*
  * [[CreatePeerConnectionTask]] sets up the peer connection object.
  */
@@ -28,8 +29,15 @@ export default class CreatePeerConnectionTask extends BaseTask implements Remova
     'overconstrained',
   ];
   private removeVideoTrackEventListeners: { [trackId: string]: (() => void)[] } = {};
-
+  private trackCapability: MediaTrackCapabilities | MediaTrackSettings;
+  private backoffPolicy: BackoffPolicy;
+  private backoffTimer: TimeoutScheduler | null = null;
+  private isContentWidthHeightSet: boolean = false;
   static readonly REMOVE_HANDLER_INTERVAL_MS: number = 10000;
+
+  private static readonly RECONNECT_FIXED_WAIT_MS = 10;
+  private static readonly RECONNECT_SHORT_BACKOFF_MS = 1 * 2000;
+  private static readonly RECONNECT_LONG_BACKOFF_MS = 5 * 1000;
 
   constructor(
     private context: AudioVideoControllerState,
@@ -203,6 +211,11 @@ export default class CreatePeerConnectionTask extends BaseTask implements Remova
       const videoTracks = stream.getVideoTracks();
       if (videoTracks && videoTracks.length) {
         const videoTrack: MediaStreamTrack = videoTracks[0];
+        console.log(
+          `&&&& received the ${trackEvent} event for tile=${tile.id()} id=${
+            track.id
+          } streamId=${streamId}`
+        );
         const callback: EventListenerOrEventListenerObject = (): void => {
           this.context.logger.info(
             `received the ${trackEvent} event for tile=${tile.id()} id=${
@@ -219,30 +232,21 @@ export default class CreatePeerConnectionTask extends BaseTask implements Remova
         });
       }
     }
-
-    let width: number;
-    let height: number;
-    if (track.getSettings) {
-      const cap: MediaTrackSettings = track.getSettings();
-      width = cap.width as number;
-      height = cap.height as number;
-    } else {
-      const cap: MediaTrackCapabilities = track.getCapabilities();
-      width = cap.width as number;
-      height = cap.height as number;
-    }
-    const externalUserId = this.context.realtimeController.realtimeExternalUserIdFromAttendeeId(
-      attendeeId
+    this.backoffPolicy = new FullJitterBackoff(
+      CreatePeerConnectionTask.RECONNECT_FIXED_WAIT_MS,
+      CreatePeerConnectionTask.RECONNECT_SHORT_BACKOFF_MS,
+      CreatePeerConnectionTask.RECONNECT_LONG_BACKOFF_MS
     );
-    if (externalUserId) {
-      tile.bindVideoStream(attendeeId, false, stream, width, height, streamId, externalUserId);
-    } else {
-      this.bindExternalIdToRemoteTile(tile, attendeeId, stream, width, height, streamId);
-    }
-    this.logger.info(
-      `video track added, created tile=${tile.id()} track=${trackId} streamId=${streamId}`
-    );
-
+    console.log('&&&& 000000 ' + 'before while');
+    //while(true){
+    console.log('&&&& 000000 ' + 'no call');
+    this.isContentWidthHeightSet = false;
+    //this.waitingToBindTile = this.bindTile(track, tile, this.trackCapability, attendeeId, stream, streamId, trackId);
+    this.bindTile(track, tile, attendeeId, stream, streamId, trackId);
+    //console.log("&&&& 000000 " + this.waitingToBindTile);
+    //if (this.waitingToBindTile === false)
+    //  break;
+    //}
     let endEvent = 'removetrack';
     let target: MediaStream = stream;
     if (!this.context.browserBehavior.requiresUnifiedPlan()) {
@@ -260,6 +264,91 @@ export default class CreatePeerConnectionTask extends BaseTask implements Remova
       delete this.removeTrackRemovedEventListeners[track.id];
     };
     target.addEventListener(endEvent, trackRemovedHandler);
+  }
+
+  bindTile(
+    track: MediaStreamTrack,
+    tile: VideoTile,
+    attendeeId: string,
+    stream: MediaStream,
+    streamId: number,
+    trackId: string
+  ): void {
+    this.trackCapability = null;
+    this.retryWithBackoff(
+      async () => {
+        if (track.getSettings) {
+          this.trackCapability = track.getSettings();
+          console.log(this.trackCapability + '&&&&& 888888 getSettings()');
+        } else {
+          this.trackCapability = track.getCapabilities();
+          console.log(this.trackCapability + '&&&&& 9999999 getSettings()');
+        }
+        this.isContentWidthHeightSet = false;
+        console.log(this.isCapabilitySet() + ' &&&&& 0000111111 ' + this.trackCapability);
+        if (this.isCapabilitySet()) {
+          const externalUserId = this.context.realtimeController.realtimeExternalUserIdFromAttendeeId(
+            attendeeId
+          );
+          const width = this.trackCapability.width as number;
+          const height = this.trackCapability.height as number;
+          console.log(width + ' &&&&& 22222 ' + height);
+          this.isContentWidthHeightSet = true;
+          if (externalUserId) {
+            tile.bindVideoStream(
+              attendeeId,
+              false,
+              stream,
+              width,
+              height,
+              streamId,
+              externalUserId
+            );
+          } else {
+            this.bindExternalIdToRemoteTile(tile, attendeeId, stream, width, height, streamId);
+          }
+          //this.backoffTimer.stop();
+          this.logger.info(
+            `video track added, created tile=${tile.id()} track=${trackId} streamId=${streamId}`
+          );
+        }
+      }
+    );
+  }
+
+  isCapabilitySet(): boolean {
+    console.log(' &&&&& 333333 ' + this.trackCapability);
+    if (this.trackCapability !== null) {
+      console.log(' &&&&& 444444 ' + this.trackCapability);
+      //if (typeof this.trackCapability.width === 'number' && typeof this.trackCapability.height === 'number') {
+      if (this.trackCapability.width !== null && typeof this.trackCapability.height !== null) {
+        console.log(' &&&&& 5555555 ' + this.trackCapability.width);
+        return true;
+      } else {
+        console.log(' &&&&& 66666 11111' + this.trackCapability.width);
+        this.isContentWidthHeightSet = false;
+        return false;
+      }
+    }
+    console.log(' &&&&& 66666 222222' + this.trackCapability.width);
+    this.isContentWidthHeightSet = false;
+    return false;
+  }
+
+  retryWithBackoff(retryFunc: () => void): boolean {
+    const willRetry = !this.isContentWidthHeightSet;
+    console.log(this.isContentWidthHeightSet + '&&&&&& 11111222222 ');
+    if (willRetry) {
+      console.log(
+        this.isContentWidthHeightSet + '&&&&&& 11111 ' + this.backoffPolicy.nextBackoffAmountMs()
+      );
+      this.backoffTimer = new TimeoutScheduler(this.backoffPolicy.nextBackoffAmountMs());
+      this.backoffTimer.start(() => {
+        console.log(this.isContentWidthHeightSet + '&&&&&& 77777777 ');
+        retryFunc();
+      });
+    }
+    return willRetry;
   }
 
   private removeRemoteVideoTrack(track: MediaStreamTrack, tileState: VideoTileState): void {
