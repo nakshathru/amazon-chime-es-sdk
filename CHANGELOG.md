@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - package name changed
 - git url changed
 - more docs
+- prebuild modified
 
 ### Removed
 
