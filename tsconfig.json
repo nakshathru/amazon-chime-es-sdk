@@ -6,9 +6,10 @@
     "noUnusedLocals": true,
     "downlevelIteration": true,
     "experimentalDecorators": true,
-    "module": "commonjs",
-    "target": "es5",
-    "lib": ["es6", "dom"],
+    "module": "ESNext",
+    "moduleResolution":"Node",
+    "target": "es2018",
+    "lib": ["es2017", "dom"],
     "declaration": true
   },
   "include": [
