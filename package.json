@@ -71,7 +71,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git://github.com/aws/amazon-chime-sdk-js"
+    "url": "git://github.com/nakshathru/amazon-chime-es-sdk"
   },
   "nyc": {
     "include": [
