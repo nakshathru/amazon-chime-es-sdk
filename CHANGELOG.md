@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Styling and Markdown support for meeting demo chat
 - package name changed
 - git url changed
+- more docs
 
 ### Removed
 
